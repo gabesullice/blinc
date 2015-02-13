@@ -1,17 +1,18 @@
 <?php
 
-function blinc_form_alter($form, $form_state, $form_id) {
-  if ($form_id == 'context_ui_form') {
-    $form_state['item'] = $form_state['build_info']['args'][0];
-  }
-}
-
-function blinc_form_block_admin_configure_alter(&$form, &$form_state, $form_id) {
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Add context editing the block configuration form.
+ */
+function blinc_form_block_admin_configure_alter(&$form, &$form_state) {
+  // Grab some identifying info from the block edit form.
   $block = array(
     'module' => $form_state['build_info']['args'][0],
     'delta' => $form_state['build_info']['args'][1],
   );
 
+  // If we have contexts that place this block, add a vertical tab for them.
   if ($contexts = blinc_get_block_contexts($block)) {
     $form['visibility']['contexts'] = array(
       '#type' => 'fieldset',
@@ -23,30 +24,47 @@ function blinc_form_block_admin_configure_alter(&$form, &$form_state, $form_id) 
       '#group' => 'visibility',
     );
 
+    // Add a fieldset for each context.
     foreach ($contexts as $key => $context) {
-      blinc_form_attach_context_form($form, $context, $block);
+      _blinc_form_attach_context_form($form, $context, $block);
     }
 
+    // Add our submit handler.
     $form['#submit'][] = 'blinc_form_block_admin_configure_submit';
   }
 }
 
+/**
+ * Processes any contexts from the block configure form.
+ */
 function blinc_form_block_admin_configure_submit(&$form, &$form_state) {
+  // Just return if the block had no contexts.
   if (!isset($form_state['values']['contexts'])) return;
+
+  // Load and process each context.
   foreach ($form_state['values']['contexts'] as $name => $context) {
     $context = context_load($name);
+    // Concat the block name used by context.
     $block = $form_state['build_info']['args'][0] . '-' . $form_state['build_info']['args'][1];
-    blinc_context_process($context, $form_state['input']['contexts'][$name], $block);
+    // Handle the processing of the form changes.
+    _blinc_context_process($context, $form_state['input']['contexts'][$name], $block);
+    // Save the updated context.
     context_save($context);
   }
 }
 
-function blinc_context_process($context, $form, $block) {
+/**
+ * Utility function to process our form.
+ */
+function _blinc_context_process($context, $form, $block) {
+  // Build out a new context object based on the original.
   $context->name = isset($form['name']) ? $form['name'] : $context->name;
   $context->description = isset($form['description']) ? $form['description'] : $context->description;
   $context->tag = isset($form['tag']) ? $form['tag'] : $context->tag;
   $context->condition_mode = isset($form['condition_mode']) ? $form['condition_mode'] : $context->condition_mode;
   $context->conditions = array();
+
+  // For any conditions, add/update/remove them. Largely taken from context_ui.
   if (!empty($form['conditions'])) {
     $enabled = explode(',', $form['conditions']['state']);
     foreach ($form['conditions']['plugins'] as $condition => $values) {
@@ -63,24 +81,36 @@ function blinc_context_process($context, $form, $block) {
       }
     }
   }
+
+  // If we updated the region, update it.
   if (isset($form['region'])) {
     $context->reactions['block']['blocks'][$block]['region'] = $form['region'];
   }
+  // If we updated the weight, update it.
   if (isset($form['weight'])) {
     $context->reactions['block']['blocks'][$block]['weight'] = $form['weight'];
   }
 
+  // Return an updated context object.
   return $context;
 }
 
-function blinc_form_attach_context_form(&$form, $context, $block) {
+/**
+ * Utility function to add a form for each context placing a block.
+ */
+function _blinc_form_attach_context_form(&$form, $context, $block) {
+
+  // Get the default theme so we can generate a list of regions.
   $theme_key = variable_get('theme_default', 'garland');
   $regions = system_region_list($theme_key, REGIONS_VISIBLE);
 
+  // Load all context conditions.
   $conditions = context_conditions();
 
+  // Get a pointer to the fieldset of the current context. Saves typing.
   $context_form =& $form['visibility']['contexts'][$context->name];
 
+  // Build all the elements for the current context form.
   $context_form = array(
     '#type' => 'fieldset',
     '#title' => $context->name,
@@ -125,6 +155,7 @@ function blinc_form_attach_context_form(&$form, $context, $block) {
     ),
   );
 
+  // If the current block of this context has siblings, add list list of them.
   if (count($context->reactions['block']['blocks']) > 1) {
     $context_form['siblings'] = array(
       '#type' => 'item',
@@ -141,6 +172,7 @@ function blinc_form_attach_context_form(&$form, $context, $block) {
     }
   }
 
+  // This adds the nested form items for each context condition plugin.
   foreach (array_keys($conditions) as $condition) {
     if ($plugin = context_get_plugin('condition', $condition)) {
       $context_form['conditions']['plugins'][$condition] = array(
@@ -155,6 +187,14 @@ function blinc_form_attach_context_form(&$form, $context, $block) {
   }
 }
 
+/**
+ * Gets all the contexts that place a certain block.
+ *
+ * @param array $block
+ *   An array containing the module and delta of a particular block. 
+ * @return mixed
+ *   An array of context objects that place a block. NULL if none.
+ */
 function blinc_get_block_contexts($block) {
   $query = db_select('blinc', 'b');
   $query->join('context', 'c', 'b.context = c.name');
@@ -171,34 +211,60 @@ function blinc_get_block_contexts($block) {
   return (isset($contexts)) ? $contexts : NULL;
 }
 
+/**
+ * Implement hook_context_registry_alter().
+ *
+ * Entry point to regenerate our map of blocks to contexts.
+ */
 function blinc_context_registry_alter($registry) {
-  $contexts = context_load();
-  if (!empty($contexts)) blinc_update_contexts($contexts);
+  blinc_update_contexts();
 }
 
-function blinc_update_contexts($contexts) {
+/**
+ * Utility function to update our map of blocks to contexts.
+ */
+function blinc_update_contexts() {
+  // Clear out the blinc table before we rebuild it.
   db_delete('blinc')->execute();
-  $query = db_insert('blinc')
-    ->fields(array('module', 'delta', 'context'));
 
-  $haveBlocks = FALSE;
+  // Load all contexts.
+  $contexts = context_load();
 
-  foreach ($contexts as $context) {
-    if (_blinc_context_has_block_reaction($context)) {
-      $haveBlocks = TRUE;
-      foreach ($context->reactions['block']['blocks'] as $block) {
-        $query->values(array(
-          'module' => $block['module'],
-          'delta' => $block['delta'],
-          'context' => $context->name,
-        ));
+  if (!empty($contexts)) {
+
+    // Create our query object.
+    $query = db_insert('blinc')
+      ->fields(array('module', 'delta', 'context'));
+
+    $haveBlocks = FALSE;
+
+    foreach ($contexts as $context) {
+
+      // If the current context places a block.
+      if (_blinc_context_has_block_reaction($context)) {
+
+        // Boolean to know if we should execute our query later.
+        $haveBlocks = TRUE;
+
+        // Create a mapping of every block placing context to its blocks.
+        foreach ($context->reactions['block']['blocks'] as $block) {
+          $query->values(array(
+            'module' => $block['module'],
+            'delta' => $block['delta'],
+            'context' => $context->name,
+          ));
+        }
       }
     }
-  }
 
-  if ($haveBlocks) $query->execute();
+    // If we really have values, execute our insert.
+    if ($haveBlocks) $query->execute();
+  }
 }
 
+/**
+ * Utility function to check that a context places a block.
+ */
 function _blinc_context_has_block_reaction($context) {
   return isset($context->reactions['block']);
 }
