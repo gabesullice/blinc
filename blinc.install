@@ -1,0 +1,27 @@
+<?php
+
+function blinc_schema() {
+  $t = get_t();
+  $schema['blinc']  = array(
+    'description' => $t('An associative table for relating blocks to contexts.'),
+    'fields' => array(
+      'module' => array(
+        'description' => $t('The blocks module.'),
+        'type'        => 'varchar',
+        'length'      => 64
+      ),
+      'delta' => array(
+        'description' => $t('The blocks delta.'),
+        'type'        => 'varchar',
+        'length'      => 32
+      ),
+      'context' => array(
+        'description' => $t('The contexts which place the block.'),
+        'type'        => 'varchar',
+        'length'   => 255,
+      ),
+    ),
+  );
+
+  return $schema;
+}
