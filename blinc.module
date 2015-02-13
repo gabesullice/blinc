@@ -1,12 +1,39 @@
 <?php
 
-function blinc_form_block_admin_configure_alter($form, &$form_state, $form_id) {
+function blinc_form_alter($form, $form_state, $form_id) {
+  dpm($form_id);
+}
+
+function blinc_form_block_admin_configure_alter(&$form, &$form_state, $form_id) {
   $block = array(
     'module' => $form_state['build_info']['args'][0],
     'delta' => $form_state['build_info']['args'][1],
   );
 
   $contexts = blinc_get_block_contexts($block);
+
+  $form['visibility']['contexts'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Contexts'),
+    '#weight' => -10,
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    '#group' => 'visibility',
+  );
+
+  foreach ($contexts as $key => $context) {
+    $form['visibility']['contexts']['contexts']  = array(
+      '#type' => 'fieldset',
+      '#title' => $context->name,
+      '#weight' => $key,
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#group' => 'visibility_contexts',
+    );
+  }
+
+  dpm($contexts);
+  dpm($form);
 }
 
 function blinc_get_block_contexts($block) {
@@ -18,26 +45,37 @@ function blinc_get_block_contexts($block) {
     ->condition('b.delta', $block['delta'])
     ->execute();
 
-  $contexts = $result->fetchAllKeyed();
+  while ($context = $result->fetchObject()) {
+    $contexts[] = context_load($context->name);
+  }
 
   return $contexts;
 }
 
 function blinc_context_registry_alter($registry) {
   $contexts = context_load();
-  if (!empty($contexts)) {
-    blinc_update_contexts($contexts);
-  }
+  if (!empty($contexts)) blinc_update_contexts($contexts);
 }
 
 function blinc_update_contexts($contexts) {
+  $deleted = db_delete('blinc')->execute();
+  $query = db_insert('blinc')
+    ->fields(array('module', 'delta', 'context'));
+
   foreach ($contexts as $context) {
-    if (_blinc_context_has_block_reaction($context) {
+    if (_blinc_context_has_block_reaction($context)) {
+      $blockCount += 1;
       foreach ($context->reactions['block']['blocks'] as $block) {
-        //$query = db_update('blinc'
+        $query->values(array(
+          'module' => $block['module'],
+          'delta' => $block['delta'],
+          'context' => $context->name,
+        ));
       }
     }
   }
+
+  if ($blockCount > 0) $query->execute();
 }
 
 function _blinc_context_has_block_reaction($context, $block) {
