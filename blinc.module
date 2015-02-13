@@ -1,7 +1,9 @@
 <?php
 
 function blinc_form_alter($form, $form_state, $form_id) {
-  dpm($form_id);
+  if ($form_id == 'context_ui_form') {
+    $form_state['item'] = $form_state['build_info']['args'][0];
+  }
 }
 
 function blinc_form_block_admin_configure_alter(&$form, &$form_state, $form_id) {
@@ -10,30 +12,147 @@ function blinc_form_block_admin_configure_alter(&$form, &$form_state, $form_id) 
     'delta' => $form_state['build_info']['args'][1],
   );
 
-  $contexts = blinc_get_block_contexts($block);
-
-  $form['visibility']['contexts'] = array(
-    '#type' => 'fieldset',
-    '#title' => t('Contexts'),
-    '#weight' => -10,
-    '#collapsible' => TRUE,
-    '#collapsed' => FALSE,
-    '#group' => 'visibility',
-  );
-
-  foreach ($contexts as $key => $context) {
-    $form['visibility']['contexts']['contexts']  = array(
+  if ($contexts = blinc_get_block_contexts($block)) {
+    $form['visibility']['contexts'] = array(
       '#type' => 'fieldset',
-      '#title' => $context->name,
-      '#weight' => $key,
+      '#title' => t('Contexts'),
+      '#weight' => -10,
       '#collapsible' => TRUE,
-      '#collapsed' => TRUE,
-      '#group' => 'visibility_contexts',
+      '#collapsed' => FALSE,
+      '#tree' => TRUE,
+      '#group' => 'visibility',
     );
+
+    foreach ($contexts as $key => $context) {
+      blinc_form_attach_context_form($form, $context, $block);
+    }
+
+    $form['#submit'][] = 'blinc_form_block_admin_configure_submit';
+  }
+}
+
+function blinc_form_block_admin_configure_submit(&$form, &$form_state) {
+  if (!isset($form_state['values']['contexts'])) return;
+  foreach ($form_state['values']['contexts'] as $name => $context) {
+    $context = context_load($name);
+    $block = $form_state['build_info']['args'][0] . '-' . $form_state['build_info']['args'][1];
+    blinc_context_process($context, $form_state['input']['contexts'][$name], $block);
+    context_save($context);
+  }
+}
+
+function blinc_context_process($context, $form, $block) {
+  $context->name = isset($form['name']) ? $form['name'] : $context->name;
+  $context->description = isset($form['description']) ? $form['description'] : $context->description;
+  $context->tag = isset($form['tag']) ? $form['tag'] : $context->tag;
+  $context->condition_mode = isset($form['condition_mode']) ? $form['condition_mode'] : $context->condition_mode;
+  $context->conditions = array();
+  if (!empty($form['conditions'])) {
+    $enabled = explode(',', $form['conditions']['state']);
+    foreach ($form['conditions']['plugins'] as $condition => $values) {
+      if (in_array($condition, $enabled, TRUE) && ($plugin = context_get_plugin('condition', $condition))) {
+        if (isset($values['values'])) {
+          $context->conditions[$condition]['values'] = $plugin->condition_form_submit($values['values']);
+        }
+        if (isset($values['options'])) {
+          $context->conditions[$condition]['options'] = $plugin->options_form_submit($values['options']);
+        }
+        if (context_empty($context->conditions[$condition]['values'])) {
+          unset($context->conditions[$condition]);
+        }
+      }
+    }
+  }
+  if (isset($form['region'])) {
+    $context->reactions['block']['blocks'][$block]['region'] = $form['region'];
+  }
+  if (isset($form['weight'])) {
+    $context->reactions['block']['blocks'][$block]['weight'] = $form['weight'];
   }
 
-  dpm($contexts);
-  dpm($form);
+  return $context;
+}
+
+function blinc_form_attach_context_form(&$form, $context, $block) {
+  $theme_key = variable_get('theme_default', 'garland');
+  $regions = system_region_list($theme_key, REGIONS_VISIBLE);
+
+  $conditions = context_conditions();
+
+  $context_form =& $form['visibility']['contexts'][$context->name];
+
+  $context_form = array(
+    '#type' => 'fieldset',
+    '#title' => $context->name,
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#group' => 'visibility_contexts',
+    'condition_mode' => array(
+      '#type' => 'checkbox',
+      '#default_value' => isset($context->condition_mode) ? $context->condition_mode : FALSE,
+      '#title' => t('Require all conditions'),
+      '#description' => t('If checked, all conditions must be met for this context to be active. Otherwise, the first condition that is met will activate this context.')
+    ),
+    'conditions' => array(
+      '#theme' => 'context_ui_plugins',
+      '#title' => t('Conditions'),
+      '#description' => t('Trigger the activation of this context'),
+      '#tree' => TRUE,
+      'selector' => array(
+        '#type' => 'select',
+        '#options' => array(0 => '<'. t('Add a condition') .'>'),
+        '#default_value' => 0,
+      ),
+      'state' => array(
+        '#attributes' => array('class' => array('context-plugins-state')),
+        '#type' => 'hidden',
+      ),
+      'plugins' => array('#tree' => TRUE),
+    ),
+    'region' => array(
+      '#type' => 'select',
+      '#title' => t('Region'),
+      '#options' => $regions,
+      '#default_value' => $context->reactions['block']['blocks'][$block['module'] . '-' . $block['delta']]['region'],
+      '#description' => t('Select the region that this block will be placed in under the conditions above.'),
+    ),
+    'weight' => array(
+      '#type' => 'select',
+      '#title' => t('Weight'),
+      '#options' => range(-30, 30, 1),
+      '#default_value' => $context->reactions['block']['blocks'][$block['module'] . '-' . $block['delta']]['weight'],
+      '#description' => t('Select the blocks weight'),
+    ),
+  );
+
+  if (count($context->reactions['block']['blocks']) > 1) {
+    $context_form['siblings'] = array(
+      '#type' => 'item',
+      '#title' => t('Siblings'),
+      '#prefix' => '<ul>',
+      '#markup' => '',
+      '#suffix' => '</ul>',
+      '#description' => t('These blocks are placed by this context as well.'),
+    );
+    foreach ($context->reactions['block']['blocks'] as $name => $settings) {
+      if ($name != $block['module'] . '-' . $block['delta']) {
+        $context_form['siblings']['#markup'] .= sprintf('<li>%s&nbsp;<strong>%s</strong></li>', $name, $settings['weight']);
+      }
+    }
+  }
+
+  foreach (array_keys($conditions) as $condition) {
+    if ($plugin = context_get_plugin('condition', $condition)) {
+      $context_form['conditions']['plugins'][$condition] = array(
+        '#tree' => TRUE,
+        '#plugin' => $plugin,
+        '#context_enabled' => isset($context->conditions[$condition]), // This flag is used at the theme layer.
+        'values' => $plugin->condition_form($context),
+        'options' => $plugin->options_form($context),
+      );
+      $context_form['conditions']['selector']['#options'][$condition] = $plugin->title;
+    }
+  }
 }
 
 function blinc_get_block_contexts($block) {
@@ -49,7 +168,7 @@ function blinc_get_block_contexts($block) {
     $contexts[] = context_load($context->name);
   }
 
-  return $contexts;
+  return (isset($contexts)) ? $contexts : NULL;
 }
 
 function blinc_context_registry_alter($registry) {
@@ -58,13 +177,15 @@ function blinc_context_registry_alter($registry) {
 }
 
 function blinc_update_contexts($contexts) {
-  $deleted = db_delete('blinc')->execute();
+  db_delete('blinc')->execute();
   $query = db_insert('blinc')
     ->fields(array('module', 'delta', 'context'));
 
+  $haveBlocks = FALSE;
+
   foreach ($contexts as $context) {
     if (_blinc_context_has_block_reaction($context)) {
-      $blockCount += 1;
+      $haveBlocks = TRUE;
       foreach ($context->reactions['block']['blocks'] as $block) {
         $query->values(array(
           'module' => $block['module'],
@@ -75,9 +196,9 @@ function blinc_update_contexts($contexts) {
     }
   }
 
-  if ($blockCount > 0) $query->execute();
+  if ($haveBlocks) $query->execute();
 }
 
-function _blinc_context_has_block_reaction($context, $block) {
+function _blinc_context_has_block_reaction($context) {
   return isset($context->reactions['block']);
 }
