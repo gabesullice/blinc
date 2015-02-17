@@ -1,6 +1,11 @@
 <?php
 
 /**
+ * @file
+ * Defines the hooks and helper functions for the blinc module.
+ */
+
+/**
  * Implements hook_form_FORM_ID_alter().
  *
  * Add context editing the block configuration form.
@@ -39,7 +44,9 @@ function blinc_form_block_admin_configure_alter(&$form, &$form_state) {
  */
 function blinc_form_block_admin_configure_submit(&$form, &$form_state) {
   // Just return if the block had no contexts.
-  if (!isset($form_state['values']['contexts'])) return;
+  if (!isset($form_state['values']['contexts'])) {
+    return;
+  }
 
   // Load and process each context.
   foreach ($form_state['values']['contexts'] as $name => $context) {
@@ -121,7 +128,7 @@ function _blinc_form_attach_context_form(&$form, $context, $block) {
       '#type' => 'checkbox',
       '#default_value' => isset($context->condition_mode) ? $context->condition_mode : FALSE,
       '#title' => t('Require all conditions'),
-      '#description' => t('If checked, all conditions must be met for this context to be active. Otherwise, the first condition that is met will activate this context.')
+      '#description' => t('If checked, all conditions must be met for this context to be active. Otherwise, the first condition that is met will activate this context.'),
     ),
     'conditions' => array(
       '#theme' => 'context_ui_plugins',
@@ -130,7 +137,7 @@ function _blinc_form_attach_context_form(&$form, $context, $block) {
       '#tree' => TRUE,
       'selector' => array(
         '#type' => 'select',
-        '#options' => array(0 => '<'. t('Add a condition') .'>'),
+        '#options' => array(0 => '<' . t('Add a condition') . '>'),
         '#default_value' => 0,
       ),
       'state' => array(
@@ -178,7 +185,8 @@ function _blinc_form_attach_context_form(&$form, $context, $block) {
       $context_form['conditions']['plugins'][$condition] = array(
         '#tree' => TRUE,
         '#plugin' => $plugin,
-        '#context_enabled' => isset($context->conditions[$condition]), // This flag is used at the theme layer.
+        // This flag is used at the theme layer.
+        '#context_enabled' => isset($context->conditions[$condition]),
         'values' => $plugin->condition_form($context),
         'options' => $plugin->options_form($context),
       );
@@ -192,6 +200,7 @@ function _blinc_form_attach_context_form(&$form, $context, $block) {
  *
  * @param array $block
  *   An array containing the module and delta of a particular block. 
+ *
  * @return mixed
  *   An array of context objects that place a block. NULL if none.
  */
@@ -212,7 +221,7 @@ function blinc_get_block_contexts($block) {
 }
 
 /**
- * Implement hook_context_registry_alter().
+ * Implements hook_context_registry_alter().
  *
  * Entry point to regenerate our map of blocks to contexts.
  */
@@ -236,7 +245,7 @@ function blinc_update_contexts() {
     $query = db_insert('blinc')
       ->fields(array('module', 'delta', 'context'));
 
-    $haveBlocks = FALSE;
+    $have_blocks = FALSE;
 
     foreach ($contexts as $context) {
 
@@ -244,7 +253,7 @@ function blinc_update_contexts() {
       if (_blinc_context_has_block_reaction($context)) {
 
         // Boolean to know if we should execute our query later.
-        $haveBlocks = TRUE;
+        $have_blocks = TRUE;
 
         // Create a mapping of every block placing context to its blocks.
         foreach ($context->reactions['block']['blocks'] as $block) {
@@ -258,7 +267,9 @@ function blinc_update_contexts() {
     }
 
     // If we really have values, execute our insert.
-    if ($haveBlocks) $query->execute();
+    if ($have_blocks) {
+      $query->execute();
+    }
   }
 }
 
