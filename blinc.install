@@ -1,5 +1,15 @@
 <?php
 
+/**
+ * @file
+ * Installation file defining db table schema.
+ */
+
+/**
+ * Implements hook_schema().
+ *
+ * Defines a table to store context/block relation.
+ */
 function blinc_schema() {
   $t = get_t();
   $schema['blinc']  = array(
@@ -8,12 +18,12 @@ function blinc_schema() {
       'module' => array(
         'description' => $t('The blocks module.'),
         'type'        => 'varchar',
-        'length'      => 64
+        'length'      => 64,
       ),
       'delta' => array(
         'description' => $t('The blocks delta.'),
         'type'        => 'varchar',
-        'length'      => 32
+        'length'      => 32,
       ),
       'context' => array(
         'description' => $t('The contexts which place the block.'),
