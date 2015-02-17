@@ -1,2 +1,7 @@
 name = Block Level Inline Contexts
+description = Manage block-placing contexts from block edit pages
+package = Context
 core = 7.x
+
+dependencies[] = context
+dependencies[] = context_ui
