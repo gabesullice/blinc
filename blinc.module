@@ -279,3 +279,5 @@ function blinc_update_contexts() {
 function _blinc_context_has_block_reaction($context) {
   return isset($context->reactions['block']);
 }
+
+/* vim: set filetype=php : */
